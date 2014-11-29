@@ -12,8 +12,17 @@ import javafx.scene.layout.BorderPane;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import ch.makery.address.model.Person;
+import ch.makery.address.model.PersonListWrapper;
+import ch.makery.address.view.BirthdayStatisticsController;
 import ch.makery.address.view.PersonEditDialogController;
 import ch.makery.address.view.PersonOverviewController;
+import ch.makery.address.view.RootLayoutController;
+import java.io.File;
+import java.util.prefs.Preferences;
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.Marshaller;
+import javax.xml.bind.Unmarshaller;
+import org.controlsfx.dialog.Dialogs;
 
 public class MainApp extends Application {
 
@@ -45,7 +54,10 @@ public class MainApp extends Application {
     public void start(Stage primaryStage) {
         this.primaryStage = primaryStage;
         this.primaryStage.setTitle("AddressApp");
-
+        
+        //Inserir imagem do programa
+        this.primaryStage.getIcons().add(new javafx.scene.image.Image("file:resources/images/address_book_32.png"));
+        
         initRootLayout();
 
         showPersonOverview();
@@ -54,19 +66,35 @@ public class MainApp extends Application {
     /**
      * Inicializa o layout raiz.
      */
+    /**
+    * Inicializa o root layout e tenta carregar o último arquivo
+    * de pessoa aberto.
+    */
     public void initRootLayout() {
-        try {
-            // Layout de raiz Carregar do arquivo fxml.
-            FXMLLoader loader = new FXMLLoader();
-            loader.setLocation(MainApp.class.getResource("view/RootLayout.fxml"));
-            rootLayout = (BorderPane) loader.load();
-            
-            // Mostrar a cena que contém o layout raiz.
-            Scene scene = new Scene(rootLayout);
-            primaryStage.setScene(scene);
-            primaryStage.show();
-        } catch (IOException e) {
-            e.printStackTrace();
+       try {
+           // Carrega o root layout do arquivo fxml.
+           FXMLLoader loader = new FXMLLoader();
+           loader.setLocation(MainApp.class
+                   .getResource("view/RootLayout.fxml"));
+           rootLayout = (BorderPane) loader.load();
+
+           // Mostra a scene (cena) contendo o root layout.
+           Scene scene = new Scene(rootLayout);
+           primaryStage.setScene(scene);
+
+           // Dá ao controller o acesso ao main app.
+           RootLayoutController controller = loader.getController();
+           controller.setMainApp(this);
+
+           primaryStage.show();
+       } catch (IOException e) {
+           e.printStackTrace();
+       }
+
+       // Tenta carregar o último arquivo de pessoa aberto.
+       File file = getPersonFilePath();
+       if (file != null) {
+           loadPersonDataFromFile(file);
         }
     }
 
@@ -144,6 +172,126 @@ public class MainApp extends Application {
      */
     public ObservableList<Person> getPersonData() {
     	return personData;
+    }
+    
+    /**
+    * Retorna o arquivo de preferências da pessoa, o último arquivo que foi aberto.
+    * As preferências são lidas do registro específico do SO (Sistema Operacional). 
+    * Se tais prefêrencias não puderem  ser encontradas, ele retorna null.
+    * 
+    * @return
+    */
+    public File getPersonFilePath(){
+        Preferences prefes = Preferences.userNodeForPackage(MainApp.class);
+        String filepath = prefes.get("filepath", null);
+        if (filepath != null) {
+            return new File(filepath);
+        }else{
+            return null;
+        }
+    }
+    
+    /**
+    * Define o caminho do arquivo do arquivo carregado atual. O caminho é persistido no
+    * registro específico do SO (Sistema Operacional).
+    * 
+    * @param file O arquivo ou null para remover o caminho
+    */
+    public void setPersonFilePath(File file){
+        Preferences prefs = Preferences.userNodeForPackage(MainApp.class);
+        if (file != null) {
+            prefs.put("filepath", file.getPath());
+            // Atualiza o título palco.
+            primaryStage.setTitle("AddressApp - " + file.getName());
+        }else{
+            prefs.remove("filepath");
+            // Atualiza o título palco.
+            primaryStage.setTitle("AddressApp");
+        }
+    }
+    
+    /**
+    * Carrega os dados da pessoa do arquivo especificado. A pessoa atual
+    * será substituída.
+    * 
+    * @param file
+    */
+    public void loadPersonDataFromFile(File file) {
+    try {
+        JAXBContext context = JAXBContext
+                .newInstance(PersonListWrapper.class);
+        Unmarshaller um = context.createUnmarshaller();
+
+        // Lendo o XML do arquivo e fazendo uma triagem .
+        PersonListWrapper wrapper = (PersonListWrapper) um.unmarshal(file);
+
+        personData.clear();
+        personData.addAll(wrapper.getPersons());
+
+        // Salve o caminho do arquivo para o registro.
+        setPersonFilePath(file);
+
+    } catch (Exception e) { // captura qualquer exceção
+        Dialogs.create()
+                .title("Erro")
+                .masthead("Não foi possível carregar dados do arquivo:\n" 
+                          + file.getPath()).showException(e);
+    }
+    }
+
+    /**
+     * Salva os dados da pessoa atual no arquivo especificado.
+     * 
+     * @param file
+     */
+    public void savePersonDataToFile(File file) {
+    try {
+        JAXBContext context = JAXBContext
+                .newInstance(PersonListWrapper.class);
+        Marshaller m = context.createMarshaller();
+        m.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, true);
+
+        // Envolvendo nossos dados da pessoa.
+        PersonListWrapper wrapper = new PersonListWrapper();
+        wrapper.setPersons(personData);
+
+        // Enpacotando e salvando XML  no arquivo.
+        m.marshal(wrapper, file);
+
+        // Saalva o caminho do arquivo no registro.
+        setPersonFilePath(file);
+    } catch (Exception e) { // captura qualquer exceção
+        Dialogs.create().title("Erro")
+                .masthead("Não foi possível salvar os dados do arquivo:\n" 
+                          + file.getPath()).showException(e);
+    }
+    }
+    
+    /**
+    * Abre uma janela para mostrar as estatísticas de aniversário.
+    */
+    public void showBirthdayStatistics() {
+    try {
+        // Carrega o arquivo fxml e cria um novo palco para o popup.
+        FXMLLoader loader = new FXMLLoader();
+        loader.setLocation(MainApp.class.getResource("view/BirthdayStatistics.fxml"));
+        AnchorPane page = (AnchorPane) loader.load();
+        Stage dialogStage = new Stage();
+        dialogStage.setTitle("Birthday Statistics");
+        dialogStage.initModality(Modality.WINDOW_MODAL);
+        dialogStage.initOwner(primaryStage);
+        Scene scene = new Scene(page);
+        dialogStage.setScene(scene);
+
+        // Define a pessoa dentro do controller.
+        BirthdayStatisticsController controller = loader.getController();
+        controller.setPersonData(personData);
+
+        dialogStage.show();
+
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
     }
 
     public static void main(String[] args) {
